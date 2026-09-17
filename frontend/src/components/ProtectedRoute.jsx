@@ -1,11 +1,20 @@
 import React from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Train } from 'lucide-react';
 
 export default function ProtectedRoute({ children }) {
   const { session, loading } = useAuth();
   const location = useLocation();
+
+  console.log(
+    '[ProtectedRoute] path:',
+    location.pathname,
+    'loading:',
+    loading,
+    'hasSession:',
+    Boolean(session)
+  );
 
   // 1. While Supabase is verifying or restoring session, show clean loading state
   if (loading) {
@@ -23,11 +32,11 @@ export default function ProtectedRoute({ children }) {
     );
   }
 
-  // 2. If Supabase session exists, render protected page
-  if (session) {
-    return children;
+  // 2. If no valid Supabase session exists, redirect directly to /login
+  if (!session) {
+    return <Navigate to="/login" replace />;
   }
 
-  // 3. Otherwise, redirect unauthenticated user to /login preserving intended route
-  return <Navigate to="/login" state={{ from: location }} replace />;
+  // 3. Render protected page or nested Outlet
+  return children ? children : <Outlet />;
 }

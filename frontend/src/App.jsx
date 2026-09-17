@@ -48,6 +48,8 @@ function MainLayout({ children, modelStatus }) {
 function RootRoute() {
   const { session, loading } = useAuth();
 
+  console.log('[RootRoute] auth state: loading =', loading, 'hasSession =', Boolean(session));
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center p-4">
@@ -64,9 +66,11 @@ function RootRoute() {
   }
 
   if (session) {
+    console.log('[RootRoute] Authenticated session active, redirecting to /dashboard');
     return <Navigate to="/dashboard" replace />;
   }
 
+  console.log('[RootRoute] Unauthenticated, redirecting to /login');
   return <Navigate to="/login" replace />;
 }
 

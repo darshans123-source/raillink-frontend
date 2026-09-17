@@ -24,31 +24,33 @@ export default function Login() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
 
-  // Target destination: if user was redirected from a protected route, preserve it; otherwise go to /dashboard
-  const rawFrom = location.state?.from?.pathname;
-  const targetRoute = rawFrom && rawFrom !== '/' && rawFrom !== '/login' ? rawFrom : '/dashboard';
-
   // If already authenticated by Supabase session, redirect to dashboard
   useEffect(() => {
+    console.log('[Login] auth check: loading =', loading, 'hasSession =', Boolean(session));
     if (!loading && session) {
-      navigate(targetRoute, { replace: true });
+      console.log('[Login] Session active, redirecting to /dashboard');
+      navigate('/dashboard', { replace: true });
     }
-  }, [session, loading, navigate, targetRoute]);
+  }, [session, loading, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
 
-    if (!email.trim() || !password) {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
       setError('Please provide both email address and password.');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      await login({ email, password });
-      navigate(targetRoute, { replace: true });
+      console.log('[Login] Submitting credentials for:', trimmedEmail);
+      const result = await login({ email: trimmedEmail, password });
+      console.log('[Login] Login success, hasSession:', Boolean(result?.session));
+      navigate('/dashboard', { replace: true });
     } catch (err) {
+      console.error('[Login] Login failed:', err.message);
       setError(err.message || 'Invalid email or password.');
     } finally {
       setIsSubmitting(false);

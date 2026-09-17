@@ -83,72 +83,48 @@ export function AuthProvider({ children }) {
     }
   }, [fetchProfile]);
 
-  // Initial session restoration and active listener for Supabase auth events
+  // 1. Initial session check & real-time auth event subscription
   useEffect(() => {
     let isMounted = true;
 
     if (!isSupabaseConfigured) {
+      console.warn('[AuthContext] Supabase is not configured; auth defaulting to unauthenticated.');
       setLoading(false);
       return;
     }
 
-    async function initializeAuth() {
-      try {
-        const { data: { session: initialSession }, error } = await supabase.auth.getSession();
-
-        if (error) {
-          console.warn('[AI-RailLink] Failed to get initial session:', error.message);
-        }
-
-        if (isMounted) {
-          if (initialSession?.user) {
-            setSession(initialSession);
-            setUser(initialSession.user);
-            // Non-blocking profile synchronization
-            syncUserProfile(initialSession.user).then((p) => {
-              if (isMounted && p) setProfile(p);
-            });
-          } else {
-            setSession(null);
-            setUser(null);
-            setProfile(null);
-          }
-        }
-      } catch (err) {
-        console.error('[AI-RailLink] Auth init error:', err);
-        if (isMounted) {
-          setSession(null);
-          setUser(null);
-          setProfile(null);
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+    // Get active session from Supabase on application startup
+    supabase.auth.getSession().then(({ data: { session: initialSession }, error }) => {
+      if (!isMounted) return;
+      if (error) {
+        console.warn('[AuthContext] getSession error:', error.message);
       }
-    }
+      console.log(
+        '[AuthContext] getSession resolved:',
+        initialSession ? `Active session for ${initialSession.user?.email}` : 'No session'
+      );
+      setSession(initialSession);
+      setUser(initialSession?.user ?? null);
+      setLoading(false);
+    }).catch((err) => {
+      if (!isMounted) return;
+      console.error('[AuthContext] getSession failed unexpectedly:', err);
+      setLoading(false);
+    });
 
-    initializeAuth();
-
-    // Listen for auth state changes (INITIAL_SESSION, SIGNED_IN, SIGNED_OUT, TOKEN_REFRESHED, USER_UPDATED)
+    // Subscribe to Supabase auth state transitions
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, currentSession) => {
         if (!isMounted) return;
+        console.log(
+          '[AuthContext] onAuthStateChange:',
+          event,
+          currentSession ? `Session exists (${currentSession.user?.email})` : 'Session is null'
+        );
 
-        if (currentSession?.user) {
-          setSession(currentSession);
-          setUser(currentSession.user);
-          setLoading(false);
-          // Sync profile in the background without blocking auth state
-          syncUserProfile(currentSession.user).then((p) => {
-            if (isMounted && p) setProfile(p);
-          });
-        } else {
-          setSession(null);
-          setUser(null);
-          setProfile(null);
-          setLoading(false);
-        }
+        setSession(currentSession);
+        setUser(currentSession?.user ?? null);
+        setLoading(false);
       }
     );
 
@@ -156,7 +132,24 @@ export function AuthProvider({ children }) {
       isMounted = false;
       subscription?.unsubscribe();
     };
-  }, [syncUserProfile]);
+  }, []);
+
+  // 2. Decoupled user profile synchronization (runs in background whenever user id changes)
+  useEffect(() => {
+    let isMounted = true;
+    if (user?.id) {
+      syncUserProfile(user).then((p) => {
+        if (isMounted && p) {
+          setProfile(p);
+        }
+      });
+    } else {
+      setProfile(null);
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.id, syncUserProfile]);
 
   // Clean, user-friendly error formatting helper
   const formatAuthError = (err) => {
@@ -197,10 +190,17 @@ export function AuthProvider({ children }) {
       throw new Error('Please enter both your email address and password.');
     }
 
+    console.log('[AuthContext] Attempting signInWithPassword for:', trimmedEmail);
     const { data, error } = await supabase.auth.signInWithPassword({
       email: trimmedEmail,
       password,
     });
+
+    console.log(
+      '[AuthContext] signInWithPassword result:',
+      data?.session ? `Session acquired for ${data.user?.email}` : 'No session returned',
+      error ? `Error: ${error.message}` : 'No error'
+    );
 
     if (error) {
       const friendlyMsg = formatAuthError(error);
@@ -208,15 +208,11 @@ export function AuthProvider({ children }) {
       throw new Error(friendlyMsg);
     }
 
-    // Set session immediately so UI unblocks instantly
-    setSession(data.session);
-    setUser(data.user);
-    setLoading(false);
-
-    // Sync profile asynchronously in background
-    syncUserProfile(data.user).then((p) => {
-      if (p) setProfile(p);
-    });
+    if (data?.session) {
+      setSession(data.session);
+      setUser(data.user);
+      setLoading(false);
+    }
 
     return { user: data.user, session: data.session };
   };
