@@ -12,7 +12,6 @@ import ChannelAnalysis from './pages/ChannelAnalysis';
 import Performance from './pages/Performance';
 import About from './pages/About';
 import Login from './pages/Login';
-import Register from './pages/Register';
 import NotFound from './pages/NotFound';
 import { api } from './services/api';
 import { Train } from 'lucide-react';
@@ -75,6 +74,7 @@ function RootRoute() {
 }
 
 function AppRoutes() {
+  const { session } = useAuth();
   const [modelStatus, setModelStatus] = useState(null);
   const [splashShown, setSplashShown] = useState(() => {
     // If returning from OAuth redirect callback, bypass splash to restore session immediately
@@ -106,7 +106,7 @@ function AppRoutes() {
     setSplashShown(false);
   };
 
-  if (splashShown) {
+  if (splashShown && !session) {
     return <SplashScreen onFinish={handleSplashFinish} />;
   }
 
@@ -115,9 +115,9 @@ function AppRoutes() {
       {/* Root Route based on Supabase session */}
       <Route path="/" element={<RootRoute />} />
 
-      {/* Public Authentication Routes */}
+      {/* Google Authentication Route */}
       <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
+      <Route path="/register" element={<Navigate to="/login" replace />} />
       <Route
         path="/dashboard"
         element={

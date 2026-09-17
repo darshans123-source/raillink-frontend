@@ -3,140 +3,83 @@ import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 
 const AuthContext = createContext(null);
 
-// Helper: Synchronously extract stored session from localStorage on initial render
-const getStoredSession = () => {
-  try {
-    if (typeof window === 'undefined') return null;
-    const storageKey = supabase.auth?.storageKey || 'sb-bktseugbuahnxwyqosbq-auth-token';
-    const raw = localStorage.getItem(storageKey);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed?.access_token ? parsed : null;
-  } catch (e) {
-    return null;
-  }
-};
-
-// Helper: Check if URL currently has OAuth callback parameters pending exchange
-const isOAuthCallbackUrl = () => {
-  if (typeof window === 'undefined') return false;
-  return (
-    window.location.search.includes('code=') ||
-    window.location.hash.includes('access_token=') ||
-    window.location.hash.includes('refresh_token=')
-  );
-};
-
 export function AuthProvider({ children }) {
-  const initialStoredSession = getStoredSession();
-  const [session, setSession] = useState(initialStoredSession);
-  const [user, setUser] = useState(initialStoredSession?.user ?? null);
+  const [session, setSession] = useState(null);
+  const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-
-  // If an OAuth callback is pending, we MUST remain in loading state until Supabase exchanges it
-  // If we already have a synchronous valid stored session, we do not need to block rendering
-  const [loading, setLoading] = useState(() => {
-    if (isOAuthCallbackUrl()) return true;
-    return !initialStoredSession;
-  });
+  const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
 
-  // Helper: Fetch user profile from Supabase 'profiles' table
-  const fetchProfile = useCallback(async (userId) => {
-    if (!userId || !isSupabaseConfigured) return null;
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (error) {
-        console.warn('[AI-RailLink] Could not fetch profile from Supabase:', error.message);
-        return null;
-      }
-      return data;
-    } catch (err) {
-      console.warn('[AI-RailLink] Error in fetchProfile:', err);
-      return null;
-    }
-  }, []);
-
-  // Helper: Sync Google / metadata profile into 'profiles' table
+  // Helper: Synchronize minimal Google user profile to Supabase 'profiles' table
   const syncUserProfile = useCallback(async (authUser) => {
     if (!authUser || !isSupabaseConfigured) return null;
 
     try {
-      // 1. Check if profile already exists
-      const existingProfile = await fetchProfile(authUser.id);
-
-      // Extract metadata provided by Google OAuth or email sign-up
       const meta = authUser.user_metadata || {};
       const fullName =
-        existingProfile?.full_name ||
         meta.full_name ||
         meta.name ||
         authUser.email?.split('@')[0] ||
         'Researcher';
       const avatarUrl =
-        existingProfile?.avatar_url ||
         meta.avatar_url ||
         meta.picture ||
         null;
 
-      // 2. If profile is missing or avatar is new from Google, upsert to profiles
-      if (!existingProfile || (!existingProfile.avatar_url && avatarUrl)) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .upsert(
-            {
-              id: authUser.id,
-              full_name: fullName,
-              avatar_url: avatarUrl,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'id' }
-          )
-          .select()
-          .maybeSingle();
+      const profileRecord = {
+        id: authUser.id,
+        full_name: fullName,
+        avatar_url: avatarUrl,
+        updated_at: new Date().toISOString(),
+      };
 
-        if (error) {
-          console.warn('[AI-RailLink] Upsert profile error:', error.message);
-          return existingProfile || { full_name: fullName, avatar_url: avatarUrl };
-        }
-        return data;
+      const { data, error } = await supabase
+        .from('profiles')
+        .upsert(profileRecord, { onConflict: 'id' })
+        .select('id, full_name, avatar_url, created_at, updated_at')
+        .maybeSingle();
+
+      if (error) {
+        console.warn('[AuthContext] Profile sync notice:', error.message);
+        return {
+          id: authUser.id,
+          full_name: fullName,
+          avatar_url: avatarUrl,
+        };
       }
-
-      return existingProfile;
+      return data;
     } catch (err) {
-      console.warn('[AI-RailLink] Error syncing user profile:', err);
+      console.warn('[AuthContext] syncUserProfile error:', err);
       return null;
     }
-  }, [fetchProfile]);
+  }, []);
 
-  // 1. Initial session check & real-time auth event subscription
+  // Application startup: restore session and listen to real-time auth changes
   useEffect(() => {
     let isMounted = true;
 
     if (!isSupabaseConfigured) {
-      console.warn('[AuthContext] Supabase is not configured; auth defaulting to unauthenticated.');
+      console.warn('[AuthContext] Supabase credentials not configured; defaulting to unauthenticated.');
       setLoading(false);
       return;
     }
 
-    const isOAuth = isOAuthCallbackUrl();
+    // Check if URL currently has OAuth callback parameters (e.g. ?code= or #access_token=)
+    const isOAuthCallback =
+      typeof window !== 'undefined' &&
+      (window.location.search.includes('code=') ||
+       window.location.hash.includes('access_token=') ||
+       window.location.hash.includes('refresh_token='));
 
-    // Subscribe to Supabase auth state transitions
+    // 1. Subscribe to Supabase auth events
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, currentSession) => {
         if (!isMounted) return;
-        console.log('Auth event:', event);
-        console.log('Session exists:', !!currentSession);
-        console.log('User exists:', !!currentSession?.user);
+        console.log('[AuthContext] onAuthStateChange event:', event, 'hasSession:', Boolean(currentSession));
 
-        // When returning from OAuth redirect, ignore initial null event while exchange is in flight
-        if (event === 'INITIAL_SESSION' && isOAuth && !currentSession) {
-          console.log('[AuthContext] OAuth code exchange pending, keeping loading state active.');
+        // When returning from Google OAuth, keep loading true during initial null session until code exchange completes
+        if (event === 'INITIAL_SESSION' && isOAuthCallback && !currentSession) {
+          console.log('[AuthContext] Google OAuth exchange in progress, holding loading state.');
           return;
         }
 
@@ -146,7 +89,7 @@ export function AuthProvider({ children }) {
       }
     );
 
-    // Get active session from Supabase on application startup (waits for URL code exchange if present)
+    // 2. Call getSession() on startup (awaits OAuth code exchange if present in URL)
     supabase.auth.getSession().then(({ data: { session: activeSession }, error }) => {
       if (!isMounted) return;
       if (error) {
@@ -155,17 +98,14 @@ export function AuthProvider({ children }) {
       if (activeSession) {
         setSession(activeSession);
         setUser(activeSession.user ?? null);
-      } else if (!isOAuth) {
+      } else if (!isOAuthCallback) {
         setSession(null);
         setUser(null);
       }
       setLoading(false);
-      console.log('Auth loading:', false);
-      console.log('Session exists:', !!activeSession);
-      console.log('User exists:', !!activeSession?.user);
     }).catch((err) => {
       if (!isMounted) return;
-      console.error('[AuthContext] getSession failed unexpectedly:', err);
+      console.error('[AuthContext] getSession failure:', err);
       setLoading(false);
     });
 
@@ -175,7 +115,7 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  // 2. Decoupled user profile synchronization (runs in background whenever user id changes)
+  // Background profile synchronization on authenticated user change
   useEffect(() => {
     let isMounted = true;
     if (user?.id) {
@@ -192,180 +132,37 @@ export function AuthProvider({ children }) {
     };
   }, [user?.id, syncUserProfile]);
 
-  // Clean, user-friendly error formatting helper
-  const formatAuthError = (err) => {
-    if (!err) return 'An unexpected error occurred. Please try again.';
-    const msg = err.message || '';
-    if (msg.toLowerCase().includes('invalid login credentials')) {
-      return 'Invalid email address or password. Please verify your credentials.';
-    }
-    if (msg.toLowerCase().includes('user already registered') || msg.toLowerCase().includes('already exists')) {
-      return 'An account with this email address already exists. Please log in instead.';
-    }
-    if (msg.toLowerCase().includes('password should be at least')) {
-      return 'Password must be at least 6 characters long.';
-    }
-    if (msg.toLowerCase().includes('rate limit')) {
-      return 'Too many attempts. Please wait a moment before trying again.';
-    }
-    if (msg.toLowerCase().includes('email not confirmed')) {
-      return 'Please verify your email address to log in, or check Supabase Auth settings.';
-    }
-    if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('failed to fetch')) {
-      return 'Network error: Unable to connect to authentication servers. Check your internet connection.';
-    }
-    return msg;
-  };
-
-  // 1. Email + Password Login
-  const login = async ({ email, password }) => {
-    setAuthError(null);
-    if (!isSupabaseConfigured) {
-      throw new Error(
-        'Supabase is not yet configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in your environment.'
-      );
-    }
-
-    const trimmedEmail = (email || '').trim().toLowerCase();
-    if (!trimmedEmail || !password) {
-      throw new Error('Please enter both your email address and password.');
-    }
-
-    console.log('[AuthContext] Attempting signInWithPassword for:', trimmedEmail);
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: trimmedEmail,
-      password,
-    });
-
-    console.log(
-      '[AuthContext] signInWithPassword result:',
-      data?.session ? `Session acquired for ${data.user?.email}` : 'No session returned',
-      error ? `Error: ${error.message}` : 'No error'
-    );
-
-    if (error) {
-      const friendlyMsg = formatAuthError(error);
-      setAuthError(friendlyMsg);
-      throw new Error(friendlyMsg);
-    }
-
-    if (data?.session) {
-      setSession(data.session);
-      setUser(data.user);
-      setLoading(false);
-    }
-
-    return { user: data.user, session: data.session };
-  };
-
-  // 2. Email + Password Registration
-  const register = async ({ name, email, password }) => {
-    setAuthError(null);
-    if (!isSupabaseConfigured) {
-      throw new Error(
-        'Supabase is not yet configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in your environment.'
-      );
-    }
-
-    const trimmedName = (name || '').trim();
-    const trimmedEmail = (email || '').trim().toLowerCase();
-
-    if (!trimmedName) {
-      throw new Error('Please enter your full name.');
-    }
-    if (!trimmedEmail || !trimmedEmail.includes('@')) {
-      throw new Error('Please enter a valid email address.');
-    }
-    if (!password || password.length < 6) {
-      throw new Error('Password must be at least 6 characters long.');
-    }
-
-    // Call official supabase.auth.signUp() passing user_metadata for trigger & profiles
-    const { data, error } = await supabase.auth.signUp({
-      email: trimmedEmail,
-      password,
-      options: {
-        data: {
-          full_name: trimmedName,
-        },
-      },
-    });
-
-    if (error) {
-      const friendlyMsg = formatAuthError(error);
-      setAuthError(friendlyMsg);
-      throw new Error(friendlyMsg);
-    }
-
-    // If user record is created, insert/upsert to profiles table directly
-    if (data.user) {
-      try {
-        await supabase.from('profiles').upsert(
-          {
-            id: data.user.id,
-            full_name: trimmedName,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'id' }
-        );
-      } catch (profileErr) {
-        console.warn('[AI-RailLink] Note: Profile creation via client:', profileErr);
-      }
-
-      if (data.session) {
-        setSession(data.session);
-        setUser(data.user);
-        setLoading(false);
-        syncUserProfile(data.user).then((p) => {
-          if (p) setProfile(p);
-        });
-      }
-    }
-
-    return {
-      user: data.user,
-      session: data.session,
-      emailConfirmationRequired: !data.session,
-    };
-  };
-
-  // 3. Google Sign-In with OAuth
+  // Google OAuth Sign-In
   const loginWithGoogle = async () => {
     setAuthError(null);
     if (!isSupabaseConfigured) {
-      throw new Error(
-        'Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.'
-      );
+      throw new Error('Supabase is not configured. Please check environment variables.');
     }
-
-    // Use current origin so it works in both localhost and production Vercel (https://raillink-xi.vercel.app)
-    const redirectUrl = window.location.origin;
 
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: redirectUrl,
+        redirectTo: window.location.origin,
       },
     });
 
     if (error) {
-      console.error(error);
-      const friendlyMsg = formatAuthError(error);
-      setAuthError(friendlyMsg);
-      throw new Error(friendlyMsg);
+      console.error('[AuthContext] Google sign-in failed:', error.message);
+      setAuthError(error.message);
+      throw error;
     }
 
     return data;
   };
 
-  // 4. Logout
+  // Logout with Supabase signOut()
   const logout = async () => {
     try {
       if (isSupabaseConfigured) {
         await supabase.auth.signOut();
       }
     } catch (err) {
-      console.warn('[AI-RailLink] SignOut warning:', err);
+      console.warn('[AuthContext] signOut warning:', err);
     } finally {
       setSession(null);
       setUser(null);
@@ -374,7 +171,7 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Normalized currentUser object for components
+  // Normalized currentUser for UI headers and components
   const currentUser = user
     ? {
         id: user.id,
@@ -393,29 +190,15 @@ export function AuthProvider({ children }) {
       }
     : null;
 
-  const authStatus = loading
-    ? 'LOADING'
-    : session
-    ? 'AUTHENTICATED'
-    : 'UNAUTHENTICATED';
-
   const value = {
-    // Session and User (Supabase session is the single source of truth)
     session,
     user,
     profile,
     currentUser,
-
-    // Status flags
     loading,
-    authStatus,
     isAuthenticated: Boolean(session),
     isSupabaseConfigured,
     authError,
-
-    // Actions
-    login,
-    register,
     loginWithGoogle,
     logout,
   };
