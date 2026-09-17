@@ -1,0 +1,24 @@
+{
+  "name": "ai-raillink",
+  "version": "2.0.0",
+  "description": "AI-RailLink - Deep Learning-Based OFDM Channel Estimation for High-Speed Railway Communication",
+  "private": true,
+  "scripts": {
+    "dev": "cd frontend && npm run dev",
+    "start": "cd frontend && npm run dev",
+    "frontend": "cd frontend && npm run dev",
+    "backend": "cd backend && npm start",
+    "ml": "cd ml-service && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
+  },
+  "keywords": [
+    "ofdm",
+    "channel-estimation",
+    "deep-learning",
+    "high-speed-rail",
+    "1d-cnn",
+    "react",
+    "fastapi"
+  ],
+  "author": "Darshan - NIT Raichur",
+  "license": "MIT"
+}
