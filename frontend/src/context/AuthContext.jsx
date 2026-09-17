@@ -99,13 +99,12 @@ export function AuthProvider({ children }) {
       if (error) {
         console.warn('[AuthContext] getSession error:', error.message);
       }
-      console.log(
-        '[AuthContext] getSession resolved:',
-        initialSession ? `Active session for ${initialSession.user?.email}` : 'No session'
-      );
       setSession(initialSession);
       setUser(initialSession?.user ?? null);
       setLoading(false);
+      console.log('Auth loading:', false);
+      console.log('Session exists:', !!initialSession);
+      console.log('User exists:', !!initialSession?.user);
     }).catch((err) => {
       if (!isMounted) return;
       console.error('[AuthContext] getSession failed unexpectedly:', err);
@@ -116,11 +115,9 @@ export function AuthProvider({ children }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, currentSession) => {
         if (!isMounted) return;
-        console.log(
-          '[AuthContext] onAuthStateChange:',
-          event,
-          currentSession ? `Session exists (${currentSession.user?.email})` : 'Session is null'
-        );
+        console.log('Auth event:', event);
+        console.log('Session exists:', !!currentSession);
+        console.log('User exists:', !!currentSession?.user);
 
         setSession(currentSession);
         setUser(currentSession?.user ?? null);
