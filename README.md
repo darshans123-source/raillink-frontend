@@ -82,15 +82,30 @@ Open your browser at **`http://localhost:3000`**.
 
 ---
 
-## 🔐 Local Authentication Architecture
+## 🔐 Supabase Authentication & User Profiles Architecture
 
-AI-RailLink includes a student-friendly client-side authentication system:
-- **Registration (`/register`)**: Captures Full Name, Email, College/Institution, and Password.
-- **Client-Side Hashing**: Hashes passwords using the **Web Crypto API** (`crypto.subtle.digest('SHA-256')`).
-- **Dynamic Header Profile**: The TopHeader automatically displays the registered researcher's name, college, and generated avatar initials.
-- **Protected Routes**: `/`, `/simulator`, `/training`, `/channel-analysis`, `/performance`, and `/about` require an active session, redirecting unauthenticated users to `/login`.
+AI-RailLink uses **Supabase Authentication** with official Google Sign-In and secure PostgreSQL Row Level Security:
+- **Registration (`/register`)**: Captures Full Name, Email, and Password. Creates an account via `supabase.auth.signUp()` and inserts a minimal profile into `profiles`.
+- **Google Sign-In**: Powered by `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } })`. User metadata (`full_name` / `avatar_url`) is automatically synced.
+- **Minimal User Profiles**: Stored in the Supabase `profiles` table (`id`, `full_name`, `avatar_url`, `created_at`, `updated_at`). Zero sensitive or unnecessary personal fields (no college, institution, phone, or date of birth).
+- **Row Level Security (RLS)**: Protects user profile records using `auth.uid() = id` policies.
+- **Dynamic Header Profile**: The TopHeader dynamically displays the authenticated researcher's full name (or email prefix fallback), avatar image / initials, and session logout.
+- **Protected Routes**: `/`, `/dashboard`, `/simulator`, `/training`, `/channel-analysis`, `/performance`, and `/about` require an active Supabase session, redirecting unauthenticated users to `/login`.
 - **Silent Splash Screen**: Displays a 1.8-second CSS-animated intro when opening the app (100% silent, zero audio).
-- **Session Management**: Allows logging out or deleting the local account directly from the header profile dropdown.
+
+### Supabase & Google Setup
+1. **Run SQL Schema**: Run `supabase_setup.sql` in the Supabase SQL Editor to create the `profiles` table, RLS policies, and `handle_new_user()` trigger.
+2. **Enable Google in Supabase**: Go to **Authentication** -> **Providers** -> **Google**, toggle Enabled, and copy the Supabase Callback URL (`https://<project-ref>.supabase.co/auth/v1/callback`).
+3. **Configure Google Cloud Console**: In Google Cloud Console -> APIs & Services -> Credentials -> OAuth 2.0 Client:
+   - Add Authorized JavaScript Origins: `http://localhost:3000` and `https://<your-vercel-domain>.vercel.app`
+   - Add Authorized Redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`
+   - Paste the Client ID and Secret into Supabase Google Provider settings.
+4. **Environment Variables**:
+   ```env
+   VITE_SUPABASE_URL=https://<your-project-ref>.supabase.co
+   VITE_SUPABASE_PUBLISHABLE_KEY=<your-anon-publishable-key>
+   VITE_API_URL=http://localhost:5000
+   ```
 
 ---
 
@@ -102,7 +117,9 @@ AI-RailLink includes a student-friendly client-side authentication system:
 3. Set **Framework Preset** to `Vite`.
 4. Build Command: `npm run build`
 5. Output Directory: `dist`
-6. Add Environment Variable:
+6. Add Environment Variables in Vercel Project Settings:
+   - `VITE_SUPABASE_URL`: Your Supabase Project URL
+   - `VITE_SUPABASE_PUBLISHABLE_KEY`: Your Supabase Anon Publishable Key
    - `VITE_API_URL`: URL of your Render backend gateway (e.g., `https://ai-raillink-backend.onrender.com`).
 7. Deploy! SPA routing is handled by `frontend/vercel.json`.
 
@@ -113,7 +130,7 @@ AI-RailLink includes a student-friendly client-side authentication system:
    - Start Command: `npm start`
    - Environment Variables:
      - `PORT`: Automatically set by Render
-     - `FRONTEND_URL`: `https://ai-raillink.vercel.app`
+     - `FRONTEND_URL`: `https://<your-app>.vercel.app`
      - `ML_SERVICE_URL`: URL of your Python ML Service
      - `NODE_ENV`: `production`
 

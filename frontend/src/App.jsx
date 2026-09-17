@@ -46,7 +46,7 @@ function MainLayout({ children, modelStatus }) {
 function AppRoutes() {
   const [modelStatus, setModelStatus] = useState(null);
   const [splashShown, setSplashShown] = useState(() => {
-    // Show splash screen on session start
+    // Show splash screen on first load of browser session
     return !sessionStorage.getItem('aiRailLinkSplashShown');
   });
 
@@ -80,6 +80,16 @@ function AppRoutes() {
       {/* Protected Application Routes */}
       <Route
         path="/"
+        element={
+          <ProtectedRoute>
+            <MainLayout modelStatus={modelStatus}>
+              <Dashboard />
+            </MainLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboard"
         element={
           <ProtectedRoute>
             <MainLayout modelStatus={modelStatus}>

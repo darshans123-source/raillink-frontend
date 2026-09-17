@@ -1,17 +1,6 @@
 /**
- * Client-side cryptographic helper using Web Crypto API.
- * Used for local demo authentication in localStorage.
+ * AI-RailLink Utilities: Avatar Initials Generator
  */
-
-export async function hashPassword(plainPassword) {
-  if (!plainPassword) return '';
-  const encoder = new TextEncoder();
-  const data = encoder.encode(plainPassword);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-  return hashHex;
-}
 
 export function getInitials(name) {
   if (!name || typeof name !== 'string') return 'U';
