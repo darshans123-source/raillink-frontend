@@ -152,8 +152,7 @@ export default function Login() {
               <div>
                 <div className="font-bold">Supabase Configuration Required</div>
                 <div className="text-[11px] text-amber-700 mt-0.5 leading-relaxed">
-                  Please set <code className="font-mono bg-amber-100 px-1 py-0.5 rounded">VITE_SUPABASE_URL</code> and{' '}
-                  <code className="font-mono bg-amber-100 px-1 py-0.5 rounded">VITE_SUPABASE_PUBLISHABLE_KEY</code> in your environment.
+                  If you just added keys to <code className="font-mono bg-amber-100 px-1 py-0.5 rounded">frontend/.env</code>, please <strong>restart your Vite dev server</strong> (<code className="font-mono bg-amber-100 px-1 py-0.5 rounded">Ctrl + C</code> then <code className="font-mono bg-amber-100 px-1 py-0.5 rounded">npm run dev</code>).
                 </div>
               </div>
             </div>
