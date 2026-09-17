@@ -7,7 +7,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [authStatus, setAuthStatus] = useState('LOADING'); // 'LOADING' | 'AUTHENTICATED' | 'UNAUTHENTICATED'
+  const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
 
   // Helper: Fetch user profile from Supabase 'profiles' table
@@ -83,12 +83,12 @@ export function AuthProvider({ children }) {
     }
   }, [fetchProfile]);
 
-  // Initial session check and active listener for Supabase auth events
+  // Initial session restoration and active listener for Supabase auth events
   useEffect(() => {
     let isMounted = true;
 
     if (!isSupabaseConfigured) {
-      setAuthStatus('UNAUTHENTICATED');
+      setLoading(false);
       return;
     }
 
@@ -97,60 +97,57 @@ export function AuthProvider({ children }) {
         const { data: { session: initialSession }, error } = await supabase.auth.getSession();
 
         if (error) {
-          console.warn('[AI-RailLink] Failed to get session:', error.message);
-          if (isMounted) {
-            setSession(null);
-            setUser(null);
-            setProfile(null);
-            setAuthStatus('UNAUTHENTICATED');
-          }
-          return;
+          console.warn('[AI-RailLink] Failed to get initial session:', error.message);
         }
 
-        if (initialSession?.user) {
-          const userProfile = await syncUserProfile(initialSession.user);
-          if (isMounted) {
+        if (isMounted) {
+          if (initialSession?.user) {
             setSession(initialSession);
             setUser(initialSession.user);
-            setProfile(userProfile);
-            setAuthStatus('AUTHENTICATED');
-          }
-        } else {
-          if (isMounted) {
+            // Non-blocking profile synchronization
+            syncUserProfile(initialSession.user).then((p) => {
+              if (isMounted && p) setProfile(p);
+            });
+          } else {
             setSession(null);
             setUser(null);
             setProfile(null);
-            setAuthStatus('UNAUTHENTICATED');
           }
         }
       } catch (err) {
         console.error('[AI-RailLink] Auth init error:', err);
         if (isMounted) {
-          setAuthStatus('UNAUTHENTICATED');
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
         }
       }
     }
 
     initializeAuth();
 
-    // Listen for auth state changes (SIGN_IN, SIGN_OUT, TOKEN_REFRESHED, etc.)
+    // Listen for auth state changes (INITIAL_SESSION, SIGNED_IN, SIGNED_OUT, TOKEN_REFRESHED, USER_UPDATED)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, currentSession) => {
+      (event, currentSession) => {
         if (!isMounted) return;
 
-        if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
-          if (currentSession?.user) {
-            const userProfile = await syncUserProfile(currentSession.user);
-            setSession(currentSession);
-            setUser(currentSession.user);
-            setProfile(userProfile);
-            setAuthStatus('AUTHENTICATED');
-          }
-        } else if (event === 'SIGNED_OUT') {
+        if (currentSession?.user) {
+          setSession(currentSession);
+          setUser(currentSession.user);
+          setLoading(false);
+          // Sync profile in the background without blocking auth state
+          syncUserProfile(currentSession.user).then((p) => {
+            if (isMounted && p) setProfile(p);
+          });
+        } else {
           setSession(null);
           setUser(null);
           setProfile(null);
-          setAuthStatus('UNAUTHENTICATED');
+          setLoading(false);
         }
       }
     );
@@ -211,12 +208,15 @@ export function AuthProvider({ children }) {
       throw new Error(friendlyMsg);
     }
 
-    // Sync profile immediately
-    const userProfile = await syncUserProfile(data.user);
+    // Set session immediately so UI unblocks instantly
     setSession(data.session);
     setUser(data.user);
-    setProfile(userProfile);
-    setAuthStatus('AUTHENTICATED');
+    setLoading(false);
+
+    // Sync profile asynchronously in background
+    syncUserProfile(data.user).then((p) => {
+      if (p) setProfile(p);
+    });
 
     return { user: data.user, session: data.session };
   };
@@ -276,11 +276,12 @@ export function AuthProvider({ children }) {
       }
 
       if (data.session) {
-        const userProfile = await syncUserProfile(data.user);
         setSession(data.session);
         setUser(data.user);
-        setProfile(userProfile);
-        setAuthStatus('AUTHENTICATED');
+        setLoading(false);
+        syncUserProfile(data.user).then((p) => {
+          if (p) setProfile(p);
+        });
       }
     }
 
@@ -300,7 +301,7 @@ export function AuthProvider({ children }) {
       );
     }
 
-    // Use current origin so it works in both localhost and production Vercel
+    // Use current origin so it works in both localhost and production Vercel (https://raillink-xi.vercel.app)
     const redirectUrl = window.location.origin;
 
     const { data, error } = await supabase.auth.signInWithOAuth({
@@ -311,6 +312,7 @@ export function AuthProvider({ children }) {
     });
 
     if (error) {
+      console.error(error);
       const friendlyMsg = formatAuthError(error);
       setAuthError(friendlyMsg);
       throw new Error(friendlyMsg);
@@ -331,7 +333,7 @@ export function AuthProvider({ children }) {
       setSession(null);
       setUser(null);
       setProfile(null);
-      setAuthStatus('UNAUTHENTICATED');
+      setLoading(false);
     }
   };
 
@@ -354,17 +356,23 @@ export function AuthProvider({ children }) {
       }
     : null;
 
+  const authStatus = loading
+    ? 'LOADING'
+    : session
+    ? 'AUTHENTICATED'
+    : 'UNAUTHENTICATED';
+
   const value = {
-    // Session and User
+    // Session and User (Supabase session is the single source of truth)
     session,
     user,
     profile,
     currentUser,
 
     // Status flags
-    loading: authStatus === 'LOADING',
+    loading,
     authStatus,
-    isAuthenticated: authStatus === 'AUTHENTICATED',
+    isAuthenticated: Boolean(session),
     isSupabaseConfigured,
     authError,
 

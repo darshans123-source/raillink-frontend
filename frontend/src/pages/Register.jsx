@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 
 export default function Register() {
-  const { register, loginWithGoogle, loading, currentUser, isSupabaseConfigured } = useAuth();
+  const { register, loginWithGoogle, loading, session, isSupabaseConfigured } = useAuth();
   const navigate = useNavigate();
 
   const [name, setName] = useState('');
@@ -28,12 +28,12 @@ export default function Register() {
 
   const initials = getInitials(name);
 
-  // If already authenticated, redirect to dashboard
+  // If already authenticated by Supabase session, redirect to dashboard
   useEffect(() => {
-    if (currentUser) {
-      navigate('/', { replace: true });
+    if (!loading && session) {
+      navigate('/dashboard', { replace: true });
     }
-  }, [currentUser, navigate]);
+  }, [session, loading, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -70,7 +70,7 @@ export default function Register() {
           'Account created successfully! If email confirmation is enabled in your Supabase project, please check your inbox to verify your address.'
         );
       } else {
-        navigate('/', { replace: true });
+        navigate('/dashboard', { replace: true });
       }
     } catch (err) {
       setError(err.message || 'Registration failed. Please try again.');

@@ -4,10 +4,10 @@ import { useAuth } from '../context/AuthContext';
 import { Train } from 'lucide-react';
 
 export default function ProtectedRoute({ children }) {
-  const { currentUser, loading } = useAuth();
+  const { session, loading } = useAuth();
   const location = useLocation();
 
-  // While Supabase is verifying or restoring session, show clean loading state
+  // 1. While Supabase is verifying or restoring session, show clean loading state
   if (loading) {
     return (
       <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center p-4">
@@ -23,10 +23,11 @@ export default function ProtectedRoute({ children }) {
     );
   }
 
-  if (!currentUser) {
-    // Redirect unauthenticated users to /login preserving intended route
-    return <Navigate to="/login" state={{ from: location }} replace />;
+  // 2. If Supabase session exists, render protected page
+  if (session) {
+    return children;
   }
 
-  return children;
+  // 3. Otherwise, redirect unauthenticated user to /login preserving intended route
+  return <Navigate to="/login" state={{ from: location }} replace />;
 }

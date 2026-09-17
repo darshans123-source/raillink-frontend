@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 
 export default function Login() {
-  const { login, loginWithGoogle, loading, currentUser, isSupabaseConfigured } = useAuth();
+  const { login, loginWithGoogle, loading, session, isSupabaseConfigured } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -24,14 +24,16 @@ export default function Login() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
 
-  const from = location.state?.from?.pathname || '/';
+  // Target destination: if user was redirected from a protected route, preserve it; otherwise go to /dashboard
+  const rawFrom = location.state?.from?.pathname;
+  const targetRoute = rawFrom && rawFrom !== '/' && rawFrom !== '/login' ? rawFrom : '/dashboard';
 
-  // If already authenticated, redirect to target
+  // If already authenticated by Supabase session, redirect to dashboard
   useEffect(() => {
-    if (currentUser) {
-      navigate(from, { replace: true });
+    if (!loading && session) {
+      navigate(targetRoute, { replace: true });
     }
-  }, [currentUser, navigate, from]);
+  }, [session, loading, navigate, targetRoute]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -45,7 +47,7 @@ export default function Login() {
     setIsSubmitting(true);
     try {
       await login({ email, password });
-      navigate(from, { replace: true });
+      navigate(targetRoute, { replace: true });
     } catch (err) {
       setError(err.message || 'Invalid email or password.');
     } finally {

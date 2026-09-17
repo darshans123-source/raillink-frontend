@@ -15,6 +15,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import NotFound from './pages/NotFound';
 import { api } from './services/api';
+import { Train } from 'lucide-react';
 
 function MainLayout({ children, modelStatus }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -43,9 +44,43 @@ function MainLayout({ children, modelStatus }) {
   );
 }
 
+// Root route redirects based on active Supabase authentication state
+function RootRoute() {
+  const { session, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-700 flex items-center justify-center text-white shadow-lg animate-pulse">
+            <Train className="w-6 h-6" />
+          </div>
+          <div className="text-xs font-semibold text-slate-500 font-mono tracking-wide">
+            Verifying authentication session...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (session) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <Navigate to="/login" replace />;
+}
+
 function AppRoutes() {
   const [modelStatus, setModelStatus] = useState(null);
   const [splashShown, setSplashShown] = useState(() => {
+    // If returning from OAuth redirect callback, bypass splash to restore session immediately
+    const isOAuthCallback =
+      window.location.hash.includes('access_token') ||
+      window.location.search.includes('code=');
+    if (isOAuthCallback) {
+      sessionStorage.setItem('aiRailLinkSplashShown', 'true');
+      return false;
+    }
     // Show splash screen on first load of browser session
     return !sessionStorage.getItem('aiRailLinkSplashShown');
   });
@@ -73,21 +108,12 @@ function AppRoutes() {
 
   return (
     <Routes>
+      {/* Root Route based on Supabase session */}
+      <Route path="/" element={<RootRoute />} />
+
       {/* Public Authentication Routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
-
-      {/* Protected Application Routes */}
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <MainLayout modelStatus={modelStatus}>
-              <Dashboard />
-            </MainLayout>
-          </ProtectedRoute>
-        }
-      />
       <Route
         path="/dashboard"
         element={
