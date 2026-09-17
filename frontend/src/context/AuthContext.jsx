@@ -3,11 +3,42 @@ import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 
 const AuthContext = createContext(null);
 
+// Helper: Synchronously extract stored session from localStorage on initial render
+const getStoredSession = () => {
+  try {
+    if (typeof window === 'undefined') return null;
+    const storageKey = supabase.auth?.storageKey || 'sb-bktseugbuahnxwyqosbq-auth-token';
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.access_token ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+// Helper: Check if URL currently has OAuth callback parameters pending exchange
+const isOAuthCallbackUrl = () => {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.location.search.includes('code=') ||
+    window.location.hash.includes('access_token=') ||
+    window.location.hash.includes('refresh_token=')
+  );
+};
+
 export function AuthProvider({ children }) {
-  const [session, setSession] = useState(null);
-  const [user, setUser] = useState(null);
+  const initialStoredSession = getStoredSession();
+  const [session, setSession] = useState(initialStoredSession);
+  const [user, setUser] = useState(initialStoredSession?.user ?? null);
   const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
+
+  // If an OAuth callback is pending, we MUST remain in loading state until Supabase exchanges it
+  // If we already have a synchronous valid stored session, we do not need to block rendering
+  const [loading, setLoading] = useState(() => {
+    if (isOAuthCallbackUrl()) return true;
+    return !initialStoredSession;
+  });
   const [authError, setAuthError] = useState(null);
 
   // Helper: Fetch user profile from Supabase 'profiles' table
@@ -93,23 +124,7 @@ export function AuthProvider({ children }) {
       return;
     }
 
-    // Get active session from Supabase on application startup
-    supabase.auth.getSession().then(({ data: { session: initialSession }, error }) => {
-      if (!isMounted) return;
-      if (error) {
-        console.warn('[AuthContext] getSession error:', error.message);
-      }
-      setSession(initialSession);
-      setUser(initialSession?.user ?? null);
-      setLoading(false);
-      console.log('Auth loading:', false);
-      console.log('Session exists:', !!initialSession);
-      console.log('User exists:', !!initialSession?.user);
-    }).catch((err) => {
-      if (!isMounted) return;
-      console.error('[AuthContext] getSession failed unexpectedly:', err);
-      setLoading(false);
-    });
+    const isOAuth = isOAuthCallbackUrl();
 
     // Subscribe to Supabase auth state transitions
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -119,11 +134,40 @@ export function AuthProvider({ children }) {
         console.log('Session exists:', !!currentSession);
         console.log('User exists:', !!currentSession?.user);
 
+        // When returning from OAuth redirect, ignore initial null event while exchange is in flight
+        if (event === 'INITIAL_SESSION' && isOAuth && !currentSession) {
+          console.log('[AuthContext] OAuth code exchange pending, keeping loading state active.');
+          return;
+        }
+
         setSession(currentSession);
         setUser(currentSession?.user ?? null);
         setLoading(false);
       }
     );
+
+    // Get active session from Supabase on application startup (waits for URL code exchange if present)
+    supabase.auth.getSession().then(({ data: { session: activeSession }, error }) => {
+      if (!isMounted) return;
+      if (error) {
+        console.warn('[AuthContext] getSession error:', error.message);
+      }
+      if (activeSession) {
+        setSession(activeSession);
+        setUser(activeSession.user ?? null);
+      } else if (!isOAuth) {
+        setSession(null);
+        setUser(null);
+      }
+      setLoading(false);
+      console.log('Auth loading:', false);
+      console.log('Session exists:', !!activeSession);
+      console.log('User exists:', !!activeSession?.user);
+    }).catch((err) => {
+      if (!isMounted) return;
+      console.error('[AuthContext] getSession failed unexpectedly:', err);
+      setLoading(false);
+    });
 
     return () => {
       isMounted = false;

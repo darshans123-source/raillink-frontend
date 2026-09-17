@@ -24,13 +24,13 @@ export default function Login() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
 
-  // If already authenticated by Supabase session, redirect to dashboard (only if not mid-submit)
+  // If already authenticated by Supabase session, automatically redirect to /dashboard
   useEffect(() => {
-    if (!loading && session && !isSubmitting) {
-      console.log('[Login] Existing active session detected, redirecting to /dashboard');
+    if (!loading && session) {
+      console.log('[Login] Active authenticated session, redirecting to /dashboard');
       navigate('/dashboard', { replace: true });
     }
-  }, [session, loading, isSubmitting, navigate]);
+  }, [session, loading, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
