@@ -35,16 +35,26 @@ def _get_tf():
     return _tf, _keras
 
 
-# Search for models in ml-service/models or workspace root models
+# Search for models in MODEL_PATH env, ml-service/models, backend/models, or root models
 _CURR_DIR = os.path.dirname(os.path.abspath(__file__))
 _ML_ROOT = os.path.dirname(os.path.dirname(_CURR_DIR))
 MODEL_DIR = os.path.join(_ML_ROOT, "models")
+
+candidate_paths = [
+    os.environ.get("MODEL_PATH", ""),
+    os.path.join(MODEL_DIR, "channel_estimator.keras"),
+    os.path.join(os.path.dirname(_ML_ROOT), "models", "channel_estimator.keras"),
+    os.path.join(os.path.dirname(os.path.dirname(_ML_ROOT)), "models", "channel_estimator.keras"),
+    os.path.join(os.getcwd(), "models", "channel_estimator.keras"),
+    os.path.join(os.getcwd(), "backend", "models", "channel_estimator.keras"),
+    os.path.join(os.getcwd(), "ml-service", "models", "channel_estimator.keras"),
+]
+
 DEFAULT_MODEL_PATH = os.path.join(MODEL_DIR, "channel_estimator.keras")
-if not os.path.exists(DEFAULT_MODEL_PATH):
-    # Check parent workspace
-    alt_path = os.path.join(os.path.dirname(_ML_ROOT), "models", "channel_estimator.keras")
-    if os.path.exists(alt_path):
-        DEFAULT_MODEL_PATH = alt_path
+for path in candidate_paths:
+    if path and os.path.isfile(path):
+        DEFAULT_MODEL_PATH = os.path.abspath(path)
+        break
 
 
 def build_1d_cnn_model(input_shape: Tuple[int, int] = (64, 2)):
