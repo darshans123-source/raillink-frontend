@@ -10,10 +10,24 @@
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   full_name TEXT,
+  email TEXT,
   avatar_url TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- If table already existed without email, safely add it
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+    AND table_name = 'profiles'
+    AND column_name = 'email'
+  ) THEN
+    ALTER TABLE public.profiles ADD COLUMN email TEXT;
+  END IF;
+END $$;
 
 -- 2. Enable Row Level Security (RLS)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -40,11 +54,11 @@ CREATE POLICY "Users can update own profile"
   USING (auth.uid() = id)
   WITH CHECK (auth.uid() = id);
 
--- 5. Trigger Function: Automatically create/update profile on auth signup (Email & OAuth)
+-- 5. Trigger Function: Automatically create/update profile on auth signup (OAuth)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, full_name, avatar_url, created_at, updated_at)
+  INSERT INTO public.profiles (id, full_name, email, avatar_url, created_at, updated_at)
   VALUES (
     NEW.id,
     COALESCE(
@@ -52,6 +66,7 @@ BEGIN
       NEW.raw_user_meta_data->>'name',
       split_part(NEW.email, '@', 1)
     ),
+    NEW.email,
     COALESCE(
       NEW.raw_user_meta_data->>'avatar_url',
       NEW.raw_user_meta_data->>'picture',
@@ -63,6 +78,7 @@ BEGIN
   ON CONFLICT (id) DO UPDATE
   SET
     full_name = EXCLUDED.full_name,
+    email = EXCLUDED.email,
     avatar_url = COALESCE(EXCLUDED.avatar_url, public.profiles.avatar_url),
     updated_at = now();
   RETURN NEW;

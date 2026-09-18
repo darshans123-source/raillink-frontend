@@ -12,9 +12,7 @@ import ChannelAnalysis from './pages/ChannelAnalysis';
 import Performance from './pages/Performance';
 import About from './pages/About';
 import Login from './pages/Login';
-import NotFound from './pages/NotFound';
 import { api } from './services/api';
-import { Train } from 'lucide-react';
 
 function MainLayout({ children, modelStatus }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -43,51 +41,23 @@ function MainLayout({ children, modelStatus }) {
   );
 }
 
-// Root route redirects based on active Supabase authentication state
+// Root route handler: cleanly dispatches based on Supabase session after loading completes
 function RootRoute() {
   const { session, loading } = useAuth();
 
-  console.log('[RootRoute] auth state: loading =', loading, 'hasSession =', Boolean(session));
-
   if (loading) {
-    return (
-      <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center p-4">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-700 flex items-center justify-center text-white shadow-lg animate-pulse">
-            <Train className="w-6 h-6" />
-          </div>
-          <div className="text-xs font-semibold text-slate-500 font-mono tracking-wide">
-            Verifying authentication session...
-          </div>
-        </div>
-      </div>
-    );
+    return <SplashScreen />;
   }
 
   if (session) {
-    console.log('[RootRoute] Authenticated session active, redirecting to /dashboard');
     return <Navigate to="/dashboard" replace />;
   }
 
-  console.log('[RootRoute] Unauthenticated, redirecting to /login');
   return <Navigate to="/login" replace />;
 }
 
 function AppRoutes() {
-  const { session } = useAuth();
   const [modelStatus, setModelStatus] = useState(null);
-  const [splashShown, setSplashShown] = useState(() => {
-    // If returning from OAuth redirect callback, bypass splash to restore session immediately
-    const isOAuthCallback =
-      window.location.hash.includes('access_token') ||
-      window.location.search.includes('code=');
-    if (isOAuthCallback) {
-      sessionStorage.setItem('aiRailLinkSplashShown', 'true');
-      return false;
-    }
-    // Show splash screen on first load of browser session
-    return !sessionStorage.getItem('aiRailLinkSplashShown');
-  });
 
   useEffect(() => {
     async function loadStatus() {
@@ -101,23 +71,16 @@ function AppRoutes() {
     loadStatus();
   }, []);
 
-  const handleSplashFinish = () => {
-    sessionStorage.setItem('aiRailLinkSplashShown', 'true');
-    setSplashShown(false);
-  };
-
-  if (splashShown && !session) {
-    return <SplashScreen onFinish={handleSplashFinish} />;
-  }
-
   return (
     <Routes>
-      {/* Root Route based on Supabase session */}
+      {/* Root Route: / -> /dashboard (if authenticated) or /login (if not) */}
       <Route path="/" element={<RootRoute />} />
 
-      {/* Google Authentication Route */}
+      {/* Supabase Google OAuth Login Route */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Navigate to="/login" replace />} />
+
+      {/* Protected Routes */}
       <Route
         path="/dashboard"
         element={
@@ -179,8 +142,8 @@ function AppRoutes() {
         }
       />
 
-      {/* 404 Fallback */}
-      <Route path="*" element={<NotFound />} />
+      {/* Fallback to root */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

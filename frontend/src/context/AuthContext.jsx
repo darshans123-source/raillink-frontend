@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
+import { supabase } from '../lib/supabaseClient';
 
 const AuthContext = createContext(null);
 
@@ -10,9 +10,9 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
 
-  // Helper: Synchronize minimal Google user profile to Supabase 'profiles' table
+  // Helper: Synchronize Google user profile to Supabase 'profiles' table
   const syncUserProfile = useCallback(async (authUser) => {
-    if (!authUser || !isSupabaseConfigured) return null;
+    if (!authUser?.id) return null;
 
     try {
       const meta = authUser.user_metadata || {};
@@ -29,6 +29,7 @@ export function AuthProvider({ children }) {
       const profileRecord = {
         id: authUser.id,
         full_name: fullName,
+        email: authUser.email || null,
         avatar_url: avatarUrl,
         updated_at: new Date().toISOString(),
       };
@@ -36,86 +37,67 @@ export function AuthProvider({ children }) {
       const { data, error } = await supabase
         .from('profiles')
         .upsert(profileRecord, { onConflict: 'id' })
-        .select('id, full_name, avatar_url, created_at, updated_at')
+        .select('id, full_name, email, avatar_url, created_at, updated_at')
         .maybeSingle();
 
       if (error) {
         console.warn('[AuthContext] Profile sync notice:', error.message);
-        return {
-          id: authUser.id,
-          full_name: fullName,
-          avatar_url: avatarUrl,
-        };
+        return profileRecord;
       }
-      return data;
+      return data || profileRecord;
     } catch (err) {
       console.warn('[AuthContext] syncUserProfile error:', err);
       return null;
     }
   }, []);
 
-  // Application startup: restore session and listen to real-time auth changes
+  // 1. Application startup: getSession() and onAuthStateChange()
   useEffect(() => {
     let isMounted = true;
+    setLoading(true);
 
-    if (!isSupabaseConfigured) {
-      console.warn('[AuthContext] Supabase credentials not configured; defaulting to unauthenticated.');
-      setLoading(false);
-      return;
-    }
-
-    // Check if URL currently has OAuth callback parameters (e.g. ?code= or #access_token=)
-    const isOAuthCallback =
-      typeof window !== 'undefined' &&
-      (window.location.search.includes('code=') ||
-       window.location.hash.includes('access_token=') ||
-       window.location.hash.includes('refresh_token='));
-
-    // 1. Subscribe to Supabase auth events
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, currentSession) => {
+    // Call getSession() on startup
+    supabase.auth
+      .getSession()
+      .then(({ data: { session: activeSession }, error }) => {
         if (!isMounted) return;
-        console.log('[AuthContext] onAuthStateChange event:', event, 'hasSession:', Boolean(currentSession));
-
-        // When returning from Google OAuth, keep loading true during initial null session until code exchange completes
-        if (event === 'INITIAL_SESSION' && isOAuthCallback && !currentSession) {
-          console.log('[AuthContext] Google OAuth exchange in progress, holding loading state.');
-          return;
+        if (error) {
+          console.warn('[AuthContext] getSession error:', error.message);
         }
-
-        setSession(currentSession);
-        setUser(currentSession?.user ?? null);
-        setLoading(false);
-      }
-    );
-
-    // 2. Call getSession() on startup (awaits OAuth code exchange if present in URL)
-    supabase.auth.getSession().then(({ data: { session: activeSession }, error }) => {
-      if (!isMounted) return;
-      if (error) {
-        console.warn('[AuthContext] getSession error:', error.message);
-      }
-      if (activeSession) {
         setSession(activeSession);
-        setUser(activeSession.user ?? null);
-      } else if (!isOAuthCallback) {
-        setSession(null);
-        setUser(null);
-      }
-      setLoading(false);
-    }).catch((err) => {
+        setUser(activeSession?.user ?? null);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        console.error('[AuthContext] getSession failure:', err);
+        setLoading(false);
+      });
+
+    // Subscribe to real-time auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, currentSession) => {
       if (!isMounted) return;
-      console.error('[AuthContext] getSession failure:', err);
+      console.log(
+        '[AuthContext] onAuthStateChange event:',
+        event,
+        'hasSession:',
+        Boolean(currentSession)
+      );
+      setSession(currentSession);
+      setUser(currentSession?.user ?? null);
       setLoading(false);
     });
 
+    // Unsubscribe when component unmounts
     return () => {
       isMounted = false;
       subscription?.unsubscribe();
     };
   }, []);
 
-  // Background profile synchronization on authenticated user change
+  // 2. Sync profile whenever active user changes
   useEffect(() => {
     let isMounted = true;
     if (user?.id) {
@@ -132,37 +114,36 @@ export function AuthProvider({ children }) {
     };
   }, [user?.id, syncUserProfile]);
 
-  // Google OAuth Sign-In
+  // 3. Real Supabase Google OAuth sign-in
   const loginWithGoogle = async () => {
     setAuthError(null);
-    if (!isSupabaseConfigured) {
-      throw new Error('Supabase is not configured. Please check environment variables.');
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
+
+      if (error) {
+        console.error('[AuthContext] Google sign-in failed:', error.message);
+        setAuthError(error.message);
+        throw error;
+      }
+
+      return data;
+    } catch (err) {
+      setAuthError(err.message || 'Google sign-in encountered an error.');
+      throw err;
     }
-
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin,
-      },
-    });
-
-    if (error) {
-      console.error('[AuthContext] Google sign-in failed:', error.message);
-      setAuthError(error.message);
-      throw error;
-    }
-
-    return data;
   };
 
-  // Logout with Supabase signOut()
+  // 4. Logout via Supabase signOut
   const logout = async () => {
     try {
-      if (isSupabaseConfigured) {
-        await supabase.auth.signOut();
-      }
+      await supabase.auth.signOut();
     } catch (err) {
-      console.warn('[AuthContext] signOut warning:', err);
+      console.warn('[AuthContext] signOut notice:', err);
     } finally {
       setSession(null);
       setUser(null);
@@ -197,7 +178,6 @@ export function AuthProvider({ children }) {
     currentUser,
     loading,
     isAuthenticated: Boolean(session),
-    isSupabaseConfigured,
     authError,
     loginWithGoogle,
     logout,

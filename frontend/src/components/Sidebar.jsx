@@ -13,7 +13,7 @@ import {
 
 const NAV_ITEMS = [
   {
-    path: '/',
+    path: '/dashboard',
     label: 'Dashboard',
     sublabel: 'Overview & Insights',
     icon: LayoutDashboard,
