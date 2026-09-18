@@ -3,6 +3,10 @@
  * Proxies requests between React frontend and Python FastAPI ML service.
  */
 
+const path = require('path');
+// Load environment variables from backend directory or project root
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -11,6 +15,7 @@ const simulationRoutes = require('./routes/simulation.routes');
 const trainingRoutes = require('./routes/training.routes');
 const performanceRoutes = require('./routes/performance.routes');
 const modelRoutes = require('./routes/model.routes');
+const aiRoutes = require('./routes/ai.routes');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -57,6 +62,7 @@ app.use('/api/simulation', simulationRoutes);
 app.use('/api/training', trainingRoutes);
 app.use('/api/performance', performanceRoutes);
 app.use('/api/model', modelRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Error Handling Middleware
 app.use(errorHandler);
